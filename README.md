@@ -1,56 +1,49 @@
 # CYPHERpc
 
-Desktopový AI asistent pro Windows – chat, hlas (Grok-like), work tools, Fortnite, privacy.
+AI asistent pro Windows – chat, hlas, work, Fortnite, privacy.
 
-**Demo režim** funguje bez API klíče. S klíčem = plné AI.
-
----
-
-## CYPHERpc.exe (Windows)
-
-Na **tvém PC** sestav exe:
+## Jednim prikazem (stahne i Python)
 
 ```powershell
 git clone https://github.com/adamsanchezsh-ui/windows-ai-assistant.git
 cd windows-ai-assistant
-.\scripts\build_exe.ps1
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\full_setup.ps1 -BuildExe
 ```
 
-Výsledek: `dist\CYPHERpc.exe`
+- Stahne **portable Python 3.12**, pokud ho nemas
+- Nainstaluje zavislosti + smoke test
+- Sestavi **`dist\CYPHERpc.exe`**
 
-1. Vedle exe měj `.env` (zkopíruj z `.env.example`)
-2. Volitelně API klíč v `.env`
-3. Dvojklik **CYPHERpc.exe**
-4. GUI: `CYPHERpc.exe --gui`
+Pak spust `dist\CYPHERpc.exe` (vedle nej `.env`).
 
-Exe se na GitHub **nenahrává** (je velký) – build u tebe trvá cca 1–3 min.
-
----
-
-## Python (bez exe)
+Jen setup bez exe:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy .env.example .env
-python scripts\smoke_test.py
-python -m src.main
+.\scripts\full_setup.ps1
 ```
 
----
+Jen Python:
 
-## API
+```powershell
+.\scripts\download_python.ps1
+```
+
+## API (volitelne)
+
+V `.env`:
 
 ```env
 OPENAI_API_KEY=sk-...
 PRIMARY_MODEL=openai:gpt-4o-mini
 ```
 
-## Příkazy
+Bez klice = demo rezim.
 
-`/help` `/settings` `/voice` `/persona` `/work` `/todo` `/fortnite` `/cc`
+## Prikazy
 
-Více: [START_HERE.md](START_HERE.md)
+`/help` `/settings` `/voice` `/persona` `/todo` `/fortnite` `/cc`
+
+[START_HERE.md](START_HERE.md)
 
 MIT
