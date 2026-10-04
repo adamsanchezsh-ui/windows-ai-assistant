@@ -1,33 +1,26 @@
 # CYPHERpc
 
-**CYPHERpc** = AI mozek + hlasový asistent + Vision + Windows assistant + web researcher + coding assistant + gaming assistant + security center + PC monitoring + automatizace + Control Center.
+**CYPHERpc** = AI mozek + hlas + Vision + Windows assistant + web researcher + coding + gaming + security + monitoring + Control Center + GUI.
 
-Moderní desktopový AI asistent pro Windows – chytrý jako ChatGPT / Claude, ale ovládá tvůj PC.
+Desktopový AI asistent pro Windows na úrovni ChatGPT / Claude – **bez umělých limitů** na délku konverzace, OCR, web výsledky ani API (limit jen pokud si ho sám nastavíš).
 
-## Hlavní pilíře
+## Co umí
 
-| Modul | Co dělá |
-|-------|--------|
-| 🧠 **AI Core** | Více providerů, auto-výběr modelu, fallback, reasoning/coding/creative/research, paměť, osobnost |
-| 🎤 **Hlas** | Wake word **„Cypher“**, STT/TTS, čeština+, push-to-talk, výběr mikrofonu/hlasu |
-| 👁️ **Vision** | Screenshoty, OCR, UI analýza, multi-monitor, oblast, on-demand/periodic |
-| 🖥️ **Windows Assistant** | Aplikace, okna, soubory, clipboard, procesy, notifikace |
-| 🎮 **Gaming** | Profily, overlay, rady (Fortnite…), priority, auto-detekce hry |
-| ⚡ **Performance** | CPU/RAM/GPU/disk/síť, Quality/Balanced/Performance |
-| 🛡️ **Security Center** | Podezřelé soubory/procesy, Defender, karanténa, audit log |
-| 📁 **File AI** | Hledání, třídění, sumarizace, bezpečné mazání |
-| 🌐 **Web Agent** | Vyhledávání, shrnutí, citace zdrojů, Research Mode |
-| 💬 **Chat** | Moderní UI, historie, přílohy, regenerace, export |
-| 🧰 **AI Tools** | Calculator, Python, web, OCR, vision, files, game… |
-| 🔐 **Permissions** | READ_SCREEN, DELETE_FILE… + potvrzení |
-| 🎛️ **Control Center** | CYPHERpc ONLINE, AI, MODEL, VOICE, VISION, GAME, CPU… |
-| 🧩 **Plugins** | Modulární API (Spotify, Discord, Browser…) |
-| 🔔 **Smart Notifications** | Shrnutí, DND, Gaming/School/Work režim |
-| 📚 **School Mode** | Výuka, obtížnost, práce s obrázkem zadání |
-| 🌙 **Profiles** | Gaming / School / Privacy / Work |
-| 🔒 **Privacy Center** | Co běží + one-click kill switch |
+- 🧠 **AI Core** – OpenAI, Anthropic, xAI, Google, lokální; auto-výběr modelu; fallback; paměť; osobnost
+- 🎤 **Hlas** – wake word **Cypher**, STT/TTS, PTT, výběr mic/hlasu
+- 👁️ **Vision** – screenshot, oblast, OCR (plný text), multi-monitor (všechny detekované)
+- 🖥️ **Windows** – okna, soubory, clipboard, procesy
+- 🎮 **Gaming** – Fortnite kouč (pozice, heal, rotace), auto-detekce her
+- 🌐 **Web Agent** – vyhledávání, čtení stránek, citace zdrojů
+- 💬 **Chat GUI** – moderní dark UI (CustomTkinter)
+- 🎛️ **Control Center** – živý stav CPU/RAM/GPU/AI/Voice/Game
+- 🔒 **Privacy + Emergency Stop**
+- ⌨️ **Hotkeys** F8–F11, Ctrl+Shift+C/P/X
+- 📍 **Tray** (volitelně)
+- 🧰 **Tools** – calculator, web, OCR, files, game…
+- 🧩 **Plugin API**
 
-## Rychlý start
+## Start
 
 ```bash
 git clone https://github.com/adamsanchezsh-ui/windows-ai-assistant.git
@@ -35,20 +28,18 @@ cd windows-ai-assistant
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env   # vyplň API klíče
-python -m src.main
+copy .env.example .env
+# vyplň OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY
+python -m src.main          # CLI
+python -m src.main --gui    # grafické rozhraní
 ```
 
-## Wake word
+## Bez limitů
 
-Řekni **„Cypher“** (nebo stiskni push-to-talk) → AI naslouchá příkazu.
-
-## Bezpečnost
-
-- Žádný cheating / anti-cheat bypass
-- Rizikové akce = potvrzení
-- Privacy Mode / Emergency Stop okamžitě vše vypne
-- Secrets jen v `.env`
+- Historie konverzace: nastavitelná, výchozí vysoká
+- OCR / web fetch: plný obsah (bez zbytečného ořezu)
+- API daily limit: `0` = neomezeno
+- Monitory: všechny, které OS nahlásí
 
 ## Licence
 

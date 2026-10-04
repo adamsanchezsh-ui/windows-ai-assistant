@@ -1,4 +1,4 @@
-"""Screen capture, OCR and vision helpers."""
+"""Screen capture, OCR, region select, multi-monitor – no hard limits."""
 
 from __future__ import annotations
 
@@ -23,8 +23,6 @@ except ImportError:
 
 
 class ScreenService:
-    """Capture screenshots, run OCR, support multi-monitor."""
-
     def __init__(
         self,
         data_dir: Path,
@@ -34,7 +32,7 @@ class ScreenService:
     ):
         self.data_dir = data_dir
         self.vision_mode = vision_mode
-        self.selected_monitor = selected_monitor  # 1-based
+        self.selected_monitor = selected_monitor
         self.privacy_mode = privacy_mode
         self._last_screenshot: Path | None = None
 
@@ -42,12 +40,12 @@ class ScreenService:
         self.privacy_mode = enabled
 
     def set_monitor(self, monitor: int) -> None:
-        if 1 <= monitor <= 4:
-            self.selected_monitor = monitor
+        if monitor >= 1:
+            self.selected_monitor = monitor  # no hard max of 4 – support all detected
 
     def _guard(self) -> None:
         if self.privacy_mode:
-            raise RuntimeError("Privacy Mode is active – screen capture disabled")
+            raise RuntimeError("Privacy Mode – screen capture disabled")
         if self.vision_mode == "off":
             raise RuntimeError("Vision mode is OFF")
 
@@ -55,7 +53,6 @@ class ScreenService:
         if mss is None:
             return [{"id": 1, "width": 1920, "height": 1080}]
         with mss.mss() as sct:
-            # monitors[0] is virtual all-in-one; 1..n are physical
             return [
                 {"id": i, "left": m["left"], "top": m["top"], "width": m["width"], "height": m["height"]}
                 for i, m in enumerate(sct.monitors[1:], start=1)
@@ -69,7 +66,6 @@ class ScreenService:
         path = out / f"screen_m{mon}.png"
 
         if mss is None:
-            # Fallback: full screen via PIL (single monitor)
             from PIL import ImageGrab
             img = ImageGrab.grab()
             img.save(path)
@@ -82,28 +78,46 @@ class ScreenService:
                 mss.tools.to_png(shot.rgb, shot.size, output=str(path))
 
         self._last_screenshot = path
-        logger.info("Screenshot saved: %s", path)
+        logger.info("Screenshot: %s", path)
+        return path
+
+    def capture_region(self, left: int, top: int, width: int, height: int) -> Path:
+        """Capture specific region of the virtual screen."""
+        self._guard()
+        out = self.data_dir / "screenshots"
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / "screen_region.png"
+        region = {"left": left, "top": top, "width": width, "height": height}
+
+        if mss is None:
+            from PIL import ImageGrab
+            img = ImageGrab.grab(bbox=(left, top, left + width, top + height))
+            img.save(path)
+        else:
+            with mss.mss() as sct:
+                shot = sct.grab(region)
+                mss.tools.to_png(shot.rgb, shot.size, output=str(path))
+
+        self._last_screenshot = path
         return path
 
     def ocr(self, image_path: Path | None = None, lang: str = "ces+eng") -> str:
         self._guard()
         if pytesseract is None:
-            return "[OCR not available – install pytesseract + Tesseract]"
+            return "[OCR unavailable – install pytesseract + Tesseract OCR]"
         path = image_path or self._last_screenshot
         if not path or not path.exists():
             path = self.capture()
         img = Image.open(path)
-        text = pytesseract.image_to_string(img, lang=lang)
-        return text.strip()
+        return pytesseract.image_to_string(img, lang=lang).strip()
 
     def analyze_placeholder(self, image_path: Path | None = None) -> dict[str, Any]:
-        """Placeholder for full vision model analysis."""
         path = image_path or self._last_screenshot
         if not path:
             path = self.capture()
         text = self.ocr(path)
         return {
             "path": str(path),
-            "ocr_preview": text[:500],
-            "note": "Pro plnou AI analýzu předej obrázek vision modelu přes agent.",
+            "ocr": text,  # full OCR text, no truncation
+            "note": "Pro plnou vision analýzu předej obrázek modelu s vision podporou.",
         }
