@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -89,6 +88,19 @@ class Agent:
         self.tools: dict[str, Callable[..., Awaitable[Any]]] = {}
         self.permissions: dict[str, ToolPermission] = {}
         self._confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
+        # Active game profile (e.g. fortnite) – injects coaching instructions
+        self.active_game: str | None = None
+        self._game_instructions: str = ""
+
+    def set_active_game(self, game_name: str | None, instructions: str = "") -> None:
+        """Set current game so system prompt includes coaching rules."""
+        self.active_game = game_name
+        self._game_instructions = instructions or ""
+        if game_name:
+            self.set_mode(AIMode.GAMING)
+            logger.info("Active game set to %s", game_name)
+        else:
+            logger.info("Active game cleared")
 
     def set_confirmation_callback(
         self, cb: Callable[[str], Awaitable[bool]]
@@ -143,7 +155,6 @@ class Agent:
             return await self._confirmation_callback(
                 f"Potvrdit akci [{tool_name}]: {description}?"
             )
-        # Safe default: deny if no UI callback
         logger.warning("No confirmation callback, denying risky tool %s", tool_name)
         return False
 
@@ -161,11 +172,20 @@ class Agent:
 
     def _build_messages(self, conv: Conversation, user_text: str) -> list[Message]:
         system = SYSTEM_PROMPTS.get(conv.mode, SYSTEM_PROMPTS[AIMode.NORMAL])
+
+        # Inject game-specific coaching (e.g. Fortnite position/heal/rotation)
+        if self.active_game and self._game_instructions:
+            system += (
+                f"\n\n=== AKTIVNÍ HRA: {self.active_game.upper()} ===\n"
+                + self._game_instructions
+            )
+
         if self.settings.privacy_mode:
-            system += "\n\n[PRIVACY MODE AKTIVNÍ – vision, voice listening a auto-skeny jsou vypnuté.]"
+            system += (
+                "\n\n[PRIVACY MODE AKTIVNÍ – vision, voice listening a auto-skeny jsou vypnuté.]"
+            )
 
         msgs = [Message(role="system", content=system)]
-        # Keep last N messages
         history = conv.messages[-(self.settings.ai.max_history) :]
         msgs.extend(history)
         msgs.append(Message(role="user", content=user_text))
@@ -191,7 +211,6 @@ class Agent:
         conv.messages.append(Message(role="user", content=user_text))
         conv.messages.append(Message(role="assistant", content=response.content))
 
-        # Auto-title first message
         if len(conv.messages) <= 2 and conv.title == "Nová konverzace":
             conv.title = user_text[:60] + ("…" if len(user_text) > 60 else "")
 
@@ -208,4 +227,5 @@ class Agent:
             "voice": self.settings.voice.enabled,
             "memory": self.settings.ai.memory_enabled,
             "active_conversation": self.active_conversation_id,
+            "active_game": self.active_game,
         }
