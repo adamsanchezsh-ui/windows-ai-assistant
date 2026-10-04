@@ -1,4 +1,4 @@
-"""CYPHERpc entry point."""
+"""CYPHERpc entry point – CLI + GUI, full tools, no artificial limits."""
 
 from __future__ import annotations
 
@@ -40,13 +40,19 @@ from src.notifications import SmartNotifications
 from src.ui.control_center import ControlCenter
 from src.ui.chat import ChatManager
 from src.plugins.base import PluginManager
+from src.tools.web_search import WebAgent
+from src.tools.calculator import calculate
+from src.tools.api_usage import APIUsageMonitor
+from src.tools.diagnostics import health_check, read_logs, system_info
+from src.hotkeys import HotkeyManager
+from src.command_palette import build_default_palette
 
 
 def setup_logging(log_dir: Path) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     logger.remove()
     logger.add(sys.stderr, level="INFO")
-    logger.add(log_dir / "cypherpc.log", rotation="10 MB", retention="14 days", level="DEBUG")
+    logger.add(log_dir / "cypherpc.log", rotation="50 MB", retention="30 days", level="DEBUG")
 
 
 async def build_agent(settings) -> tuple[Agent, dict]:
@@ -55,6 +61,7 @@ async def build_agent(settings) -> tuple[Agent, dict]:
     personality = Personality(language=settings.default_language)
     selector = ModelSelector(primary=settings.primary_model)
     perm_mgr = PermissionManager()
+    usage = APIUsageMonitor(settings.data_dir, daily_limit=0)  # 0 = unlimited
 
     agent = Agent(
         settings, router,
@@ -63,6 +70,8 @@ async def build_agent(settings) -> tuple[Agent, dict]:
         model_selector=selector,
         permission_manager=perm_mgr,
     )
+    # Raise history capacity (no tight limit)
+    settings.ai.max_history = max(settings.ai.max_history, 200)
 
     desktop = DesktopController()
     screen = ScreenService(
@@ -92,8 +101,8 @@ async def build_agent(settings) -> tuple[Agent, dict]:
     chat_mgr = ChatManager(settings.data_dir)
     plugins = PluginManager()
     fn_adapter = FortniteAdapter()
+    web_agent = WebAgent(max_results=0)  # unlimited results from page
 
-    # Privacy emergency wiring
     def _privacy_stop() -> None:
         settings.privacy_mode = True
         screen.set_privacy(True)
@@ -105,11 +114,11 @@ async def build_agent(settings) -> tuple[Agent, dict]:
 
     async def on_voice_command(cmd: str) -> None:
         reply = await agent.chat(cmd)
-        await voice.speak(reply[:300])
+        await voice.speak(reply)
 
     voice.set_command_handler(on_voice_command)
 
-    # Fortnite tools
+    # --- Tools ---
     async def fortnite_heal(hp=None, shield=None, in_combat=False, about_to_rotate=False):
         advice = fn_adapter.heal_advice(hp=hp, shield=shield, in_combat=in_combat, about_to_rotate=about_to_rotate)
         overlay.update(tip=advice.message, status="FORTNITE")
@@ -125,14 +134,17 @@ async def build_agent(settings) -> tuple[Agent, dict]:
         overlay.update(tip=pos.suggestion, status="FORTNITE")
         return {"suggestion": pos.suggestion, "high_ground": pos.high_ground, "cover": pos.cover, "risk": pos.risk}
 
-    async def fortnite_tip(situation="general", hp=None, shield=None, **kwargs):
-        tip = fn_adapter.quick_tip(situation, hp=hp, shield=shield, **kwargs)
-        overlay.update(tip=tip, status="FORTNITE")
-        if voice.enabled:
-            await voice.speak(tip)
-        return {"tip": tip}
+    async def tool_web_search(query: str):
+        report = await web_agent.research(query)
+        return {"summary": report.summary, "sources": report.sources, "count": len(report.results)}
 
-    # Register tools
+    async def tool_calculate(expression: str):
+        return calculate(expression)
+
+    async def tool_capture_region(left: int, top: int, width: int, height: int):
+        path = await asyncio.to_thread(screen.capture_region, left, top, width, height)
+        return {"path": str(path)}
+
     agent.register_tool("list_windows", desktop.list_windows)
     agent.register_tool("focus_window", desktop.focus_window)
     agent.register_tool("type_text", desktop.type_text)
@@ -140,6 +152,7 @@ async def build_agent(settings) -> tuple[Agent, dict]:
     agent.register_tool("click", desktop.click)
     agent.register_tool("launch_app", desktop.launch_app, requires_confirmation=True)
     agent.register_tool("capture_screen", lambda monitor=None: asyncio.to_thread(screen.capture, monitor))
+    agent.register_tool("capture_region", tool_capture_region)
     agent.register_tool("ocr_screen", lambda: asyncio.to_thread(screen.ocr))
     agent.register_tool("get_clipboard", lambda: asyncio.to_thread(clipboard.get))
     agent.register_tool("set_clipboard", lambda text: asyncio.to_thread(clipboard.set, text))
@@ -150,7 +163,8 @@ async def build_agent(settings) -> tuple[Agent, dict]:
     agent.register_tool("fortnite_heal", fortnite_heal)
     agent.register_tool("fortnite_rotate", fortnite_rotate)
     agent.register_tool("fortnite_position", fortnite_position)
-    agent.register_tool("fortnite_tip", fortnite_tip)
+    agent.register_tool("web_search", tool_web_search)
+    agent.register_tool("calculate", tool_calculate)
 
     def on_game_detected(game_name: str, pid: int) -> None:
         profile = get_profile(game_name)
@@ -161,8 +175,6 @@ async def build_agent(settings) -> tuple[Agent, dict]:
 
     priority_monitor = PriorityMonitor()
     priority_monitor.on_game_detected = on_game_detected
-
-    current_profile_id = "default"
 
     services = {
         "desktop": desktop,
@@ -184,7 +196,9 @@ async def build_agent(settings) -> tuple[Agent, dict]:
         "control_center": control_center,
         "chat_mgr": chat_mgr,
         "plugins": plugins,
-        "current_profile_id": current_profile_id,
+        "web_agent": web_agent,
+        "usage": usage,
+        "current_profile_id": "default",
     }
     return agent, services
 
@@ -197,7 +211,7 @@ def apply_user_profile(agent: Agent, services: dict, profile_id: str) -> None:
     services["voice"].hints_enabled = up.voice_hints
     services["voice"].wake_word_enabled = up.wake_word
     services["screen"].vision_mode = up.vision_mode
-    services["performance"].set_mode(up.performance_mode)  # type: ignore
+    services["performance"].set_mode(up.performance_mode)
     agent.set_style(up.ai_style)
     services["notifications"].set_mode(profile_id)
     if profile_id == "privacy":
@@ -207,16 +221,13 @@ def apply_user_profile(agent: Agent, services: dict, profile_id: str) -> None:
         agent.settings.privacy_mode = False
         services["screen"].set_privacy(False)
         services["voice"].set_privacy(False)
-        if not agent.enabled:
-            agent.enabled = True
-    logger.info("Profile applied: %s", up.name)
+        agent.enabled = True
+    logger.info("Profile: %s", up.name)
 
 
 def show_control_center(agent: Agent, services: dict) -> None:
     stats = services["performance"].get_stats()
-    gpu = None
-    if stats.get("gpu"):
-        gpu = stats["gpu"].get("util")
+    gpu = stats["gpu"]["util"] if stats.get("gpu") else None
     status = services["control_center"].build_status(
         ai_online=agent.enabled,
         model=agent.last_model_used or agent.router.current_model_name(),
@@ -234,12 +245,34 @@ def show_control_center(agent: Agent, services: dict) -> None:
         providers=agent.router.list_available(),
     )
     print(services["control_center"].format_cli(status))
+    print("API usage:", services["usage"].snapshot())
+
+
+def status_dict(agent: Agent, services: dict) -> dict:
+    stats = services["performance"].get_stats()
+    gpu = stats["gpu"]["util"] if stats.get("gpu") else None
+    return services["control_center"].build_status(
+        ai_online=agent.enabled,
+        model=agent.last_model_used or agent.router.current_model_name(),
+        mode=agent.mode.value,
+        voice=services["voice"].status(),
+        vision_mode=services["screen"].vision_mode,
+        overlay_on=services["overlay"].enabled,
+        game=agent.active_game,
+        monitor=agent.settings.selected_monitor,
+        cpu=stats.get("cpu_percent", 0),
+        ram=stats.get("ram_percent", 0),
+        gpu=gpu,
+        privacy_mode=agent.settings.privacy_mode,
+        profile=services.get("current_profile_id", "default"),
+        providers=agent.router.list_available(),
+    )
 
 
 async def interactive_cli(agent: Agent, services: dict) -> None:
     print("=" * 62)
-    print("  CYPHERpc v0.2  –  AI Desktop Assistant")
-    print("  Wake word: „Cypher“  |  /help pro příkazy")
+    print("  CYPHERpc v0.3  –  unlimited AI desktop assistant")
+    print("  Wake word: Cypher  |  /help  |  python -m src.main --gui")
     print("=" * 62)
 
     services["priority_monitor"].start()
@@ -249,6 +282,17 @@ async def interactive_cli(agent: Agent, services: dict) -> None:
     memory: MemoryStore = services["memory"]
     privacy: PrivacyCenter = services["privacy"]
     chat_mgr: ChatManager = services["chat_mgr"]
+    web: WebAgent = services["web_agent"]
+
+    # Hotkeys
+    hk = HotkeyManager()
+    hk.register_defaults(
+        on_ai_toggle=lambda: print("AI:", "ON" if agent.toggle() else "OFF"),
+        on_overlay=lambda: print("Overlay:", "ON" if overlay.toggle() else "OFF"),
+        on_voice=lambda: print("Voice:", "ON" if voice.toggle() else "OFF"),
+        on_cc=lambda: show_control_center(agent, services),
+        on_stop=lambda: (privacy.emergency_stop(), print("EMERGENCY STOP")),
+    )
 
     while True:
         try:
@@ -261,59 +305,40 @@ async def interactive_cli(agent: Agent, services: dict) -> None:
 
         if low in ("/quit", "/exit", "q"):
             break
-
         if low in ("/help", "/?"):
             print("""
-Příkazy:
-  /cc              Control Center (stav)
-  /status          JSON status AI
-  /mode <name>     normal|reasoning|coding|vision|research|school|gaming|creative
-  /profile <id>    gaming|school|privacy|work|default
-  /privacy         Privacy Mode ON/OFF
-  /stop            Emergency Stop
-  /new             Nová konverzace
-  /chats           Seznam konverzací
-  /memory          Zobraz paměť
-  /memory on|off   Zapni/vypni paměť
-  /forget all      Smaž paměť
-  /style <name>    brief|normal|detailed|technical|simple
-  /voice           Voice ON/OFF
-  /wake            Wake word ON/OFF
-  /fortnite        Fortnite kouč
-  /heal [hp] [sh]  Heal rada
-  /rotate          Rotace
-  /pos [phase]     Pozice
-  /what            Co umím?
-  /quit /exit       Konec
+/cc /status /mode /profile /privacy /stop /new /chats
+/memory [on|off] /forget all /style /voice /wake
+/fortnite /heal /rotate /pos
+/search <dotaz>     web research se zdroji
+/calc <výraz>       kalkulačka
+/diag               diagnostika
+/logs               poslední log
+/usage              API spotřeba (unlimited default)
+/what /quit
 """)
             continue
-
         if low in ("/cc", "/control", "/dashboard"):
             show_control_center(agent, services)
             continue
-
         if low == "/status":
             print(json.dumps(agent.status(), indent=2, ensure_ascii=False))
             continue
-
         if low.startswith("/mode "):
             try:
                 agent.set_mode(user.split(maxsplit=1)[1])
-                print(f"Režim: {agent.mode.value}")
+                print("Režim:", agent.mode.value)
             except ValueError:
-                print("Dostupné:", [m.value for m in AIMode])
+                print([m.value for m in AIMode])
             continue
-
         if low.startswith("/profile "):
             pid = user.split(maxsplit=1)[1].strip().lower()
             if pid not in PROFILES:
-                print("Dostupné profily:", list(PROFILES.keys()))
+                print(list(PROFILES.keys()))
                 continue
             apply_user_profile(agent, services, pid)
-            print(f"Profil: {PROFILES[pid].name}")
             show_control_center(agent, services)
             continue
-
         if low == "/privacy":
             if agent.settings.privacy_mode:
                 privacy.disable_privacy_mode()
@@ -321,139 +346,150 @@ Příkazy:
                 services["screen"].set_privacy(False)
                 voice.set_privacy(False)
                 agent.enabled = True
-                print("Privacy Mode: OFF")
+                print("Privacy: OFF")
             else:
                 privacy.enable_privacy_mode()
-                print("Privacy Mode: ON")
+                print("Privacy: ON")
             continue
-
         if low in ("/stop", "/emergency"):
             privacy.emergency_stop()
-            print("🚨 EMERGENCY STOP – vše zastaveno")
+            print("EMERGENCY STOP")
             continue
-
         if low == "/new":
-            conv = agent.new_conversation()
+            print("Nová:", agent.new_conversation().id)
             chat_mgr.new_conversation()
-            print("Nová konverzace:", conv.id)
             continue
-
         if low == "/chats":
-            for c in chat_mgr.list_conversations()[:20]:
-                print(f"  {c['id'][:8]}  {c['title'][:40]}  ({c['messages']} msg)")
+            for c in chat_mgr.list_conversations():
+                print(f"  {c['id'][:8]}  {c['title']}  ({c['messages']})")
             continue
-
         if low == "/memory":
-            if not memory.enabled:
-                print("Paměť je vypnutá. /memory on")
-            else:
-                items = memory.list_all()
-                if not items:
-                    print("(prázdná)")
-                for i in items:
-                    print(f"  [{i.id}] ({i.category}) {i.content}")
+            items = memory.list_all() if memory.enabled else []
+            print("(vypnuto)" if not memory.enabled else "\n".join(f"[{i.id}] {i.content}" for i in items) or "(prázdná)")
             continue
-
         if low == "/memory on":
-            memory.set_enabled(True)
-            print("Paměť zapnuta")
-            continue
+            memory.set_enabled(True); print("Paměť ON"); continue
         if low == "/memory off":
-            memory.set_enabled(False)
-            print("Paměť vypnuta")
-            continue
+            memory.set_enabled(False); print("Paměť OFF"); continue
         if low == "/forget all":
-            n = memory.forget_all()
-            print(f"Smazáno {n} položek")
-            continue
-
+            print("Smazáno", memory.forget_all()); continue
         if low.startswith("/style "):
-            agent.set_style(user.split(maxsplit=1)[1])
-            print(f"Styl: {agent.personality.style.value}")
-            continue
-
+            agent.set_style(user.split(maxsplit=1)[1]); print(agent.personality.style.value); continue
         if low == "/voice":
-            print("Voice:", "ON" if voice.toggle() else "OFF")
-            continue
+            print("Voice", "ON" if voice.toggle() else "OFF"); continue
         if low == "/wake":
-            print("Wake word:", "ON" if voice.toggle_wake_word() else "OFF")
-            continue
-
+            print("Wake", "ON" if voice.toggle_wake_word() else "OFF"); continue
         if low == "/fortnite":
-            profile = get_profile("fortnite")
-            if profile:
-                agent.set_active_game("fortnite", profile.ai_instructions)
+            p = get_profile("fortnite")
+            if p:
+                agent.set_active_game("fortnite", p.ai_instructions)
                 overlay.enabled = True
-                overlay.update(status="FORTNITE", tip="Fortnite kouč aktivní")
-                print("Fortnite koučink ON. Ptej se na pozice, heal, rotaci.")
+                print("Fortnite kouč ON")
             continue
-
         if low.startswith("/heal"):
             parts = user.split()
             hp = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
-            shield = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
-            advice = fn.heal_advice(hp=hp, shield=shield)
-            print(f"\n🩸 {advice.message}")
-            overlay.update(tip=advice.message)
-            if voice.enabled:
-                await voice.speak(advice.message)
+            sh = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+            a = fn.heal_advice(hp=hp, shield=sh)
+            print(a.message); overlay.update(tip=a.message)
             continue
-
         if low.startswith("/rotate"):
-            adv = fn.rotation_advice()
-            print(f"\n📍 {adv.direction} — {adv.reason}")
-            for t in adv.tips:
-                print(f"   • {t}")
+            a = fn.rotation_advice()
+            print(a.direction, "—", a.reason)
+            for t in a.tips: print(" •", t)
             continue
-
         if low.startswith("/pos"):
             phase = user.split()[1] if len(user.split()) > 1 else "mid"
-            pos = fn.position_advice(phase=phase)
-            print(f"\n🏔️  {pos.suggestion}")
+            print(fn.position_advice(phase=phase).suggestion); continue
+        if low.startswith("/search "):
+            q = user.split(maxsplit=1)[1]
+            report = await web.research(q)
+            print(report.summary)
+            print("Zdroje:", report.sources)
+            # Also ask AI to synthesize
+            prompt = web.research_prompt(report)
+            reply = await agent.chat(prompt)
+            print("\nCYPHERpc:", reply)
+            continue
+        if low.startswith("/calc "):
+            print(calculate(user.split(maxsplit=1)[1])); continue
+        if low == "/diag":
+            print(json.dumps(health_check(agent.router.list_available(), agent.settings.data_dir), indent=2))
+            print(system_info()); continue
+        if low == "/logs":
+            print(read_logs(agent.settings.log_dir)); continue
+        if low == "/usage":
+            print(services["usage"].snapshot()); continue
+        if low in ("/what", "/co umíš", "/co umis"):
+            print("Chat, coding, vision, web, Windows, gaming, hlas Cypher, privacy, GUI — piš cokoliv.")
             continue
 
-        if low in ("/what", "/what can i do", "/co umis", "/co umíš"):
-            print("""
-CYPHERpc umí:
-  • Běžný chat (jako ChatGPT/Claude) – ptej se na cokoliv
-  • Coding, reasoning, research, creative, school
-  • Ovládání Windows (okna, soubory, clipboard)
-  • Vision / OCR obrazovky
-  • Hlas + wake word „Cypher“
-  • Herní rady (Fortnite, Minecraft, …)
-  • PC monitoring, security, web research
-  • Profily: Gaming / School / Privacy / Work
-  • Privacy Center + Emergency Stop
-Napiš /help pro příkazy, nebo prostě piš česky.
-""")
-            continue
-
-        # Normal intelligent chat
         try:
             chat_mgr.add_message("user", user)
             reply = await agent.chat(user)
             chat_mgr.add_message("assistant", reply)
+            # Track usage if response has usage info (best-effort)
             print("\nCYPHERpc:", reply)
             if voice.enabled and voice.hints_enabled:
-                await voice.speak(reply[:200])
+                await voice.speak(reply)
         except Exception as e:
-            logger.exception("Chat error")
+            logger.exception("chat")
             print("Chyba:", e)
 
+    hk.unbind_all()
     services["priority_monitor"].stop()
     print("CYPHERpc: Nashledanou.")
+
+
+def run_gui(agent: Agent, services: dict) -> None:
+    try:
+        from src.ui.gui import CypherGUI
+    except Exception as e:
+        print("GUI nedostupné:", e)
+        print("Nainstaluj: pip install customtkinter")
+        return
+
+    services["priority_monitor"].start()
+
+    async def on_send(text: str) -> str:
+        services["chat_mgr"].add_message("user", text)
+        reply = await agent.chat(text)
+        services["chat_mgr"].add_message("assistant", reply)
+        return reply
+
+    gui = CypherGUI(
+        on_send=on_send,
+        get_status=lambda: status_dict(agent, services),
+        on_privacy=lambda: services["privacy"].enable_privacy_mode(),
+        on_stop=lambda: services["privacy"].emergency_stop(),
+    )
+    try:
+        gui.run()
+    finally:
+        services["priority_monitor"].stop()
 
 
 def main() -> None:
     settings = get_settings()
     setup_logging(settings.log_dir)
-    logger.info("Starting CYPHERpc v0.2.0")
+    logger.info("Starting CYPHERpc v0.3.0")
+
+    use_gui = "--gui" in sys.argv or "-g" in sys.argv
 
     async def runner():
         agent, services = await build_agent(settings)
+        if use_gui:
+            # GUI blocks; run setup then hand off
+            return agent, services
         await interactive_cli(agent, services)
+        return None, None
 
-    asyncio.run(runner())
+    if use_gui:
+        agent, services = asyncio.run(runner())
+        if agent:
+            run_gui(agent, services)
+    else:
+        asyncio.run(runner())
 
 
 if __name__ == "__main__":
