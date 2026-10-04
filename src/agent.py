@@ -1,4 +1,4 @@
-"""Central AI agent with tool orchestration and conversation history."""
+"""CYPHERpc central AI agent – tool orchestration, memory, personality, smart model pick."""
 
 from __future__ import annotations
 
@@ -9,6 +9,10 @@ from typing import Any, Callable, Awaitable
 
 from src.model import Message, ModelRouter, ModelResponse
 from src.settings import Settings
+from src.core.memory import MemoryStore
+from src.core.personality import Personality, Style
+from src.core.model_selector import ModelSelector, TaskType
+from src.core.permissions import PermissionManager
 
 logger = logging.getLogger(__name__)
 
@@ -27,35 +31,38 @@ class AIMode(str, Enum):
 
 SYSTEM_PROMPTS: dict[AIMode, str] = {
     AIMode.NORMAL: (
-        "Jsi užitečný, přátelský a přesný AI asistent pro Windows PC. "
-        "Odpovídej v jazyce uživatele (výchozí čeština). Buď stručný, ale informativní."
+        "Jsi CYPHERpc – pokročilý AI asistent pro Windows PC, na úrovni ChatGPT/Claude. "
+        "Odpovídej v jazyce uživatele (výchozí čeština). Buď přesný, užitečný a přirozený. "
+        "Umíš konverzovat, vysvětlovat, programovat, plánovat, analyzovat a ovládat PC přes nástroje."
     ),
     AIMode.REASONING: (
-        "Jsi reasoning asistent. Rozkládej problémy na kroky, uváděj předpoklady "
-        "a navrhuj několik možných řešení."
+        "Jsi reasoning asistent CYPHERpc. Rozkládej problémy na kroky, uváděj předpoklady, "
+        "zvažuj alternativy a navrhuj nejlepší řešení s odůvodněním."
     ),
     AIMode.CODING: (
-        "Jsi expert na programování. Piš čistý, udržovatelný kód, vysvětluj rozhodnutí "
-        "a upozorňuj na rizika."
+        "Jsi expert na programování. Piš čistý, udržovatelný kód, vysvětluj rozhodnutí, "
+        "upozorňuj na edge cases a rizika. Preferuj best practices."
     ),
     AIMode.VISION: (
-        "Analyzuješ obrazovku / obrázky. Popisuj UI prvky, text (OCR) a navrhuj akce."
+        "Analyzuješ obrazovku a obrázky. Popisuj UI prvky, text (OCR), layout a navrhuj konkrétní akce."
     ),
     AIMode.RESEARCH: (
-        "Používáš aktuální informace z webu. Vždy uváděj zdroje."
+        "Používáš aktuální informace z webu. Vždy rozlišuj znalosti modelu vs. vyhledané info. "
+        "Uváděj zdroje."
     ),
     AIMode.SCHOOL: (
-        "Jsi trpělivý učitel. Vysvětluj jednoduše / normálně / podrobně podle nastavení."
+        "Jsi trpělivý učitel CYPHERpc. Vysvětluj podle nastavené obtížnosti "
+        "(jednoduše / normálně / podrobně). Povzbuzuj a kontroluj pochopení."
     ),
     AIMode.GAMING: (
-        "Poskytuješ herní rady, objective guidance a situační tipy. "
+        "Poskytuješ herní rady, objective/route guidance a situační tipy. "
         "Nikdy nepodporuješ cheating, botování ani obcházení anti-cheatu."
     ),
     AIMode.PC_CONTROL: (
         "Ovládáš počítač pomocí nástrojů. Před rizikovými akcemi vždy požaduj potvrzení."
     ),
     AIMode.CREATIVE: (
-        "Jsi kreativní asistent – příběhy, nápady, texty, brainstorming."
+        "Jsi kreativní asistent – příběhy, nápady, texty, brainstorming. Buď originální."
     ),
 }
 
@@ -76,11 +83,24 @@ class ToolPermission:
 
 
 class Agent:
-    """Unified AI brain that uses tools and maintains conversation state."""
+    """Jednotný AI mozek CYPHERpc."""
 
-    def __init__(self, settings: Settings, router: ModelRouter):
+    def __init__(
+        self,
+        settings: Settings,
+        router: ModelRouter,
+        memory: MemoryStore | None = None,
+        personality: Personality | None = None,
+        model_selector: ModelSelector | None = None,
+        permission_manager: PermissionManager | None = None,
+    ):
         self.settings = settings
         self.router = router
+        self.memory = memory
+        self.personality = personality or Personality()
+        self.model_selector = model_selector or ModelSelector(primary=settings.primary_model)
+        self.perm_manager = permission_manager or PermissionManager()
+
         self.enabled = True
         self.mode = AIMode.NORMAL
         self.conversations: dict[str, Conversation] = {}
@@ -88,23 +108,19 @@ class Agent:
         self.tools: dict[str, Callable[..., Awaitable[Any]]] = {}
         self.permissions: dict[str, ToolPermission] = {}
         self._confirmation_callback: Callable[[str], Awaitable[bool]] | None = None
-        # Active game profile (e.g. fortnite) – injects coaching instructions
         self.active_game: str | None = None
         self._game_instructions: str = ""
+        self.last_model_used: str = settings.primary_model
+        self.auto_model_select = True
 
     def set_active_game(self, game_name: str | None, instructions: str = "") -> None:
-        """Set current game so system prompt includes coaching rules."""
         self.active_game = game_name
         self._game_instructions = instructions or ""
         if game_name:
             self.set_mode(AIMode.GAMING)
-            logger.info("Active game set to %s", game_name)
-        else:
-            logger.info("Active game cleared")
+            logger.info("Active game: %s", game_name)
 
-    def set_confirmation_callback(
-        self, cb: Callable[[str], Awaitable[bool]]
-    ) -> None:
+    def set_confirmation_callback(self, cb: Callable[[str], Awaitable[bool]]) -> None:
         self._confirmation_callback = cb
 
     def register_tool(
@@ -116,14 +132,11 @@ class Agent:
     ) -> None:
         self.tools[name] = func
         self.permissions[name] = ToolPermission(
-            name=name,
-            allowed=allowed,
-            requires_confirmation=requires_confirmation,
+            name=name, allowed=allowed, requires_confirmation=requires_confirmation
         )
 
     def new_conversation(self, title: str = "Nová konverzace") -> Conversation:
         import uuid
-
         cid = str(uuid.uuid4())
         conv = Conversation(id=cid, title=title, mode=self.mode)
         self.conversations[cid] = conv
@@ -147,6 +160,12 @@ class Agent:
         if conv:
             conv.mode = mode
 
+    def set_style(self, style: str) -> None:
+        try:
+            self.personality.style = Style(style.lower())
+        except ValueError:
+            pass
+
     async def _maybe_confirm(self, tool_name: str, description: str) -> bool:
         perm = self.permissions.get(tool_name)
         if not perm or not perm.requires_confirmation:
@@ -155,7 +174,7 @@ class Agent:
             return await self._confirmation_callback(
                 f"Potvrdit akci [{tool_name}]: {description}?"
             )
-        logger.warning("No confirmation callback, denying risky tool %s", tool_name)
+        logger.warning("No confirmation callback – denying %s", tool_name)
         return False
 
     async def run_tool(self, name: str, **kwargs: Any) -> Any:
@@ -172,8 +191,13 @@ class Agent:
 
     def _build_messages(self, conv: Conversation, user_text: str) -> list[Message]:
         system = SYSTEM_PROMPTS.get(conv.mode, SYSTEM_PROMPTS[AIMode.NORMAL])
+        system += "\n" + self.personality.system_addon()
 
-        # Inject game-specific coaching (e.g. Fortnite position/heal/rotation)
+        if self.memory and self.memory.enabled:
+            mem_ctx = self.memory.as_context()
+            if mem_ctx:
+                system += "\n\n" + mem_ctx
+
         if self.active_game and self._game_instructions:
             system += (
                 f"\n\n=== AKTIVNÍ HRA: {self.active_game.upper()} ===\n"
@@ -182,7 +206,7 @@ class Agent:
 
         if self.settings.privacy_mode:
             system += (
-                "\n\n[PRIVACY MODE AKTIVNÍ – vision, voice listening a auto-skeny jsou vypnuté.]"
+                "\n\n[PRIVACY MODE – vision, voice listening a auto-skeny jsou vypnuté.]"
             )
 
         msgs = [Message(role="system", content=system)]
@@ -193,7 +217,7 @@ class Agent:
 
     async def chat(self, user_text: str, conversation_id: str | None = None) -> str:
         if not self.enabled:
-            return "AI je vypnutá. Stiskni F8 nebo zapni AI v Control Center."
+            return "CYPHERpc AI je vypnutá. Stiskni F8 nebo zapni AI v Control Center."
 
         if conversation_id:
             conv = self.conversations.get(conversation_id)
@@ -206,7 +230,15 @@ class Agent:
                 conv = self.new_conversation()
 
         messages = self._build_messages(conv, user_text)
-        response: ModelResponse = await self.router.chat(messages)
+
+        # Auto model selection by task
+        model_spec = None
+        if self.auto_model_select:
+            task = self.model_selector.detect_task(user_text, mode=self.mode.value)
+            model_spec = self.model_selector.select(task, auto=True)
+
+        response: ModelResponse = await self.router.chat(messages, model_spec=model_spec)
+        self.last_model_used = f"{response.provider}:{response.model}"
 
         conv.messages.append(Message(role="user", content=user_text))
         conv.messages.append(Message(role="assistant", content=response.content))
@@ -220,12 +252,14 @@ class Agent:
         return {
             "enabled": self.enabled,
             "mode": self.mode.value,
-            "model": self.router.current_model_name(),
+            "model": self.last_model_used or self.router.current_model_name(),
             "providers": self.router.list_available(),
             "privacy_mode": self.settings.privacy_mode,
             "vision": self.settings.ai.vision_mode,
             "voice": self.settings.voice.enabled,
-            "memory": self.settings.ai.memory_enabled,
+            "memory": bool(self.memory and self.memory.enabled),
+            "style": self.personality.style.value,
             "active_conversation": self.active_conversation_id,
             "active_game": self.active_game,
+            "auto_model_select": self.auto_model_select,
         }
