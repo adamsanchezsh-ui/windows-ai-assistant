@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class HealAdvice:
     should_heal: bool
-    urgency: str  # none | low | medium | high | critical
+    urgency: str
     message: str
     preferred_items: list[str]
 
@@ -23,7 +23,7 @@ class HealAdvice:
 class RotationAdvice:
     direction: str
     reason: str
-    priority: str  # safe | balanced | aggressive
+    priority: str
     tips: list[str]
 
 
@@ -36,13 +36,6 @@ class PositionAdvice:
 
 
 class FortniteAdapter:
-    """
-    Poradenský adaptér pro Fortnite.
-    Používá pouze to, co uživatel / vision / OCR poskytne –
-    žádné čtení paměti hry, žádný ESP, žádný aimbot.
-    """
-
-    # Typické drop tipy (obecné, bez závislosti na aktuální mapě)
     DROP_TIPS = {
         "aggressive": [
             "Hot drop na populární POI – očekávej early fights.",
@@ -57,22 +50,18 @@ class FortniteAdapter:
         "passive": [
             "Klidnější okraj mapy / menší POI.",
             "Full loot + shield, pak pomalá rotace edge zóny.",
-            "Vyhûej se early fightům, hraj o placement.",
+            "Vyhýbej se early fightům, hraj o placement.",
         ],
     }
 
     HEAL_PRIORITY = [
-        "Chug Splash",
-        "Shield Potion",
-        "Big Shield Potion",
-        "Medkit",
-        "Bandages",
-        "Fish / Food",
+        "Chug Splash", "Shield Potion", "Big Shield Potion",
+        "Medkit", "Bandages", "Fish / Food",
     ]
 
     def __init__(self, profile: GameProfile | None = None):
         self.profile = profile or get_profile("fortnite")
-        thresholds = (self.profile.extra or {}).get("heal_thresholds", {})
+        thresholds = (self.profile.extra or {}).get("heal_thresholds", {}) if self.profile else {}
         self.critical_hp = thresholds.get("critical_hp", 30)
         self.low_hp = thresholds.get("low_hp", 50)
         self.low_shield = thresholds.get("low_shield", 50)
@@ -86,68 +75,27 @@ class FortniteAdapter:
         about_to_rotate: bool = False,
         has_heals: bool = True,
     ) -> HealAdvice:
-        """
-        Kdy popnout heal / shield.
-        Hodnoty hp/shield může dodat vision/OCR nebo uživatel.
-        """
         if hp is None and shield is None:
             return HealAdvice(
-                should_heal=False,
-                urgency="none",
-                message="Nevím aktuální HP/shield – řekni mi stav nebo zapni vision.",
-                preferred_items=self.HEAL_PRIORITY,
+                False, "none",
+                "Nevím aktuální HP/shield – řekni mi stav (např. /heal 40) nebo zapni vision.",
+                self.HEAL_PRIORITY,
             )
-
         hp = hp if hp is not None else 100
         shield = shield if shield is not None else 0
-
         if not has_heals:
-            return HealAdvice(
-                False, "none",
-                "Nemáš healy – hledej loot (Shield Pot, Medkit, Bandage).",
-                self.HEAL_PRIORITY,
-            )
-
+            return HealAdvice(False, "none", "Nemáš healy – hledej loot.", self.HEAL_PRIORITY)
         if in_combat and hp > self.critical_hp:
-            return HealAdvice(
-                False, "low",
-                "Jsi ve fightu – heal až po něm (nebo do boxu).",
-                self.HEAL_PRIORITY,
-            )
-
+            return HealAdvice(False, "low", "Jsi ve fightu – heal až po něm (nebo do boxu).", self.HEAL_PRIORITY)
         if hp <= self.critical_hp:
-            return HealAdvice(
-                True, "critical",
-                f"KRITICKÉ HP ({hp})! Okamžitě heal (Medkit / Bandage), schovej se.",
-                ["Medkit", "Bandages", "Chug Splash"],
-            )
-
+            return HealAdvice(True, "critical", f"KRITICKÉ HP ({hp})! Okamžitě heal, schovej se.", ["Medkit", "Bandages", "Chug Splash"])
         if hp <= self.low_hp:
-            return HealAdvice(
-                True, "high",
-                f"Nízké HP ({hp}) – heal co nejdřív, až budeš v bezpečí.",
-                ["Medkit", "Bandages", "Chug Splash"],
-            )
-
+            return HealAdvice(True, "high", f"Nízké HP ({hp}) – heal co nejdřív v bezpečí.", ["Medkit", "Bandages"])
         if about_to_rotate and shield < self.pre_rotate_min_shield:
-            return HealAdvice(
-                True, "medium",
-                f"Před rotací doplň shield (máš {shield}). Ideálně 50+.",
-                ["Shield Potion", "Chug Splash", "Big Shield Potion"],
-            )
-
+            return HealAdvice(True, "medium", f"Před rotací doplň shield (máš {shield}).", ["Shield Potion", "Chug Splash"])
         if shield < self.low_shield and not in_combat:
-            return HealAdvice(
-                True, "medium",
-                f"Nízký shield ({shield}) – popni Shield Pot, než půjdeš dál.",
-                ["Shield Potion", "Chug Splash"],
-            )
-
-        return HealAdvice(
-            False, "none",
-            f"HP/shield OK ({hp}/{shield}). Šetři healy na fight / endgame.",
-            self.HEAL_PRIORITY,
-        )
+            return HealAdvice(True, "medium", f"Nízký shield ({shield}) – popni Shield Pot.", ["Shield Potion", "Chug Splash"])
+        return HealAdvice(False, "none", f"HP/shield OK ({hp}/{shield}). Šetři healy.", self.HEAL_PRIORITY)
 
     def rotation_advice(
         self,
@@ -157,174 +105,58 @@ class FortniteAdapter:
         materials: int | None = None,
         style: str = "balanced",
     ) -> RotationAdvice:
-        """Kam jít dál – obecné principy bez map hacků."""
         tips: list[str] = []
-
         if zone_closing:
             tips.append("Storm se zavírá – prioritizuj cestu do zóny.")
-            if has_mobility:
-                tips.append("Použij Shockwave / Grappler / vozidlo na rychlou rotaci.")
-            else:
-                tips.append("Běž edge zóny, drž cover, ne open field.")
-            return RotationAdvice(
-                direction="do zóny (edge)",
-                reason="Storm pressure",
-                priority="safe",
-                tips=tips,
-            )
-
+            tips.append("Použij mobility, pokud máš; jinak edge + cover.")
+            return RotationAdvice("do zóny (edge)", "Storm pressure", "safe", tips)
         if near_fight:
-            tips.append("Blízký fight – zvaž third-party z výhodné pozice.")
-            tips.append("Nebo se stáhni a hraj o placement.")
-            return RotationAdvice(
-                direction="k fightu (opatrně) nebo pryč",
-                reason="Third-party příležitost / riziko",
-                priority="aggressive" if style == "aggressive" else "balanced",
-                tips=tips,
-            )
-
-        tips.append("Rotuj směrem k předpokládané další zóně.")
-        tips.append("Preferuj high ground a přirozený cover.")
-        tips.append("Vyhni se dlouhému běhu přes otevřené pole.")
+            tips.append("Blízký fight – third-party nebo ústup.")
+            return RotationAdvice("k fightu opatrně nebo pryč", "Third-party", "balanced", tips)
+        tips.append("Rotuj k další zóně, preferuj high ground a cover.")
+        tips.append("Vyhni se dlouhému běhu přes open field.")
         if materials is not None and materials < 100:
-            tips.append(f"Málo materials ({materials}) – cestou farmi stromy/zdi.")
-
-        return RotationAdvice(
-            direction="edge zóny / high ground",
-            reason="Bezpečná mid-game rotace",
-            priority=style if style in ("safe", "balanced", "aggressive") else "balanced",
-            tips=tips,
-        )
+            tips.append(f"Málo materials ({materials}) – farmi cestou.")
+        return RotationAdvice("edge zóny / high ground", "Mid-game rotace", style if style in ("safe", "balanced", "aggressive") else "balanced", tips)
 
     def position_advice(
         self,
-        phase: str = "mid",  # early | mid | late | endgame
+        phase: str = "mid",
         has_high_ground: bool = False,
         in_open: bool = False,
     ) -> PositionAdvice:
         if phase == "endgame":
-            return PositionAdvice(
-                suggestion="Hraj high ground nebo silný edge box. Nesedej uprostřed zóny bez coveru.",
-                high_ground=True,
-                cover="vlastní build / přírodní high ground",
-                risk="high" if in_open else "medium",
-            )
+            return PositionAdvice("Hraj high ground nebo silný edge box. Nesedej uprostřed bez coveru.", True, "build / high ground", "high" if in_open else "medium")
         if phase == "late":
-            return PositionAdvice(
-                suggestion="Připrav si high ground setup, mít healy a mobility. Sleduj okolní teamy.",
-                high_ground=True,
-                cover="kopec / budova / vlastní rampa",
-                risk="medium",
-            )
+            return PositionAdvice("Připrav high ground, healy a mobility. Sleduj teamy.", True, "kopec / budova", "medium")
         if in_open:
-            return PositionAdvice(
-                suggestion="Jsi v open – okamžitě hledej cover (budova, skála, strom) nebo build.",
-                high_ground=False,
-                cover="nejbližší přírodní / build",
-                risk="high",
-            )
+            return PositionAdvice("Jsi v open – hledej cover nebo build.", False, "budova / skála", "high")
         if has_high_ground:
-            return PositionAdvice(
-                suggestion="Máš high ground – drž ho, info peeka, nenech se under-buildnout.",
-                high_ground=True,
-                cover="high ground",
-                risk="low",
-            )
-        return PositionAdvice(
-            suggestion="Hledej elevated pozici nebo pevný cover. Připrav únikovou cestu.",
-            high_ground=False,
-            cover="budova / terén",
-            risk="medium",
-        )
+            return PositionAdvice("Drž high ground, peeka, nenech se under-buildnout.", True, "high ground", "low")
+        return PositionAdvice("Hledej elevated pozici nebo pevný cover.", False, "budova / terén", "medium")
 
     def drop_suggestion(self, style: str = "balanced") -> list[str]:
         return self.DROP_TIPS.get(style, self.DROP_TIPS["balanced"])
 
-    def quick_tip(
-        self,
-        situation: str,
-        hp: int | None = None,
-        shield: int | None = None,
-        **kwargs: Any,
-    ) -> str:
-        """
-        Krátká rada pro overlay / voice.
-        situation: drop | rotate | heal | fight | endgame | loot | general
-        """
+    def quick_tip(self, situation: str, hp: int | None = None, shield: int | None = None, **kwargs: Any) -> str:
         situation = situation.lower()
-
         if situation == "heal":
-            advice = self.heal_advice(hp=hp, shield=shield, **kwargs)
-            return advice.message
-
+            return self.heal_advice(hp=hp, shield=shield, **kwargs).message
         if situation == "rotate":
             adv = self.rotation_advice(**kwargs)
             return f"Rotace: {adv.direction}. {adv.tips[0] if adv.tips else adv.reason}"
-
         if situation == "drop":
-            tips = self.drop_suggestion(kwargs.get("style", "balanced"))
-            return tips[0]
-
+            return self.drop_suggestion(kwargs.get("style", "balanced"))[0]
         if situation == "endgame":
-            pos = self.position_advice(phase="endgame", **kwargs)
-            return pos.suggestion
-
+            return self.position_advice(phase="endgame", **kwargs).suggestion
         if situation == "fight":
-            return (
-                "Fight: boxuj se při low HP, peeka úhly, "
-                "po killu okamžitě heal + check third party."
-            )
-
+            return "Fight: boxuj při low HP, peeka úhly, po killu heal + third party."
         if situation == "loot":
-            return (
-                "Loot priorita: zbraň → shield → materials → mobility → healy. "
-                "Netrav čas over-lootem."
-            )
-
-        return (
-            "Fortnite tip: drž edge zóny, high ground, "
-            "heal před rotací, pozor na third party."
-        )
-
-    def full_status_advice(
-        self,
-        hp: int | None = None,
-        shield: int | None = None,
-        phase: str = "mid",
-        zone_closing: bool = False,
-        in_combat: bool = False,
-        style: str = "balanced",
-    ) -> dict[str, Any]:
-        """Komplexní rada pro agent / overlay."""
-        heal = self.heal_advice(
-            hp=hp,
-            shield=shield,
-            in_combat=in_combat,
-            about_to_rotate=zone_closing,
-        )
-        rotation = self.rotation_advice(
-            zone_closing=zone_closing,
-            style=style,
-        )
-        position = self.position_advice(phase=phase)
-
-        summary_parts = []
-        if heal.should_heal:
-            summary_parts.append(heal.message)
-        summary_parts.append(f"Pozice: {position.suggestion}")
-        summary_parts.append(f"Rotace: {rotation.direction} — {rotation.reason}")
-
-        return {
-            "summary": " | ".join(summary_parts),
-            "heal": heal,
-            "rotation": rotation,
-            "position": position,
-            "overlay_line": heal.message if heal.urgency in ("critical", "high") else position.suggestion,
-        }
+            return "Loot: zbraň → shield → materials → mobility → healy."
+        return "Tip: edge zóny, high ground, heal před rotací."
 
 
 def get_adapter(game_name: str) -> FortniteAdapter | None:
-    """Factory – zatím Fortnite, později další hry."""
     name = game_name.lower().replace(" ", "_").replace("-", "_")
     if name in ("fortnite", "fn"):
         return FortniteAdapter()
