@@ -1,20 +1,23 @@
 app:
-  name: "Windows AI Assistant"
-  version: "0.1.0"
+  name: "CYPHERpc"
+  version: "0.2.0"
   language: "cs"
   theme: "dark"
+  accent_color: "#7C3AED"
 
 ai:
   default_mode: "normal"
   max_history: 50
   temperature: 0.7
-  vision_mode: "on_demand"  # off | on_demand | periodic
+  vision_mode: "on_demand"
   periodic_interval_sec: 30
   memory_enabled: false
+  auto_model_select: true
+  style: "normal"
 
 performance:
-  mode: "balanced"  # quality | balanced | performance
-  default_priority: "normal"  # normal | high
+  mode: "balanced"
+  default_priority: "normal"
 
 overlay:
   enabled: false
@@ -26,12 +29,17 @@ voice:
   language: "cs"
   volume: 0.8
   rate: 1.0
+  wake_word: false
+  wake_word_phrase: "cypher"
   auto_detect_language: false
 
 hotkeys:
   ai_toggle: "F8"
   overlay_toggle: "F9"
   voice_hints_toggle: "F10"
+  push_to_talk: "F11"
+  emergency_stop: "Ctrl+Shift+Esc"
+  control_center: "Ctrl+Shift+C"
 
 monitors:
   selected: 1
@@ -44,4 +52,5 @@ security:
   use_defender: true
   quarantine_instead_of_delete: true
 
+profile: "default"
 privacy_mode: false

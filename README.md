@@ -1,83 +1,55 @@
-# Windows AI Assistant
+# CYPHERpc
 
-Pokročilý modulární AI desktop asistent pro Windows PC.
+**CYPHERpc** = AI mozek + hlasový asistent + Vision + Windows assistant + web researcher + coding assistant + gaming assistant + security center + PC monitoring + automatizace + Control Center.
 
-## Funkce (základ)
+Moderní desktopový AI asistent pro Windows – chytrý jako ChatGPT / Claude, ale ovládá tvůj PC.
 
-- **Univerzální AI asistent** – konverzace, reasoning, coding, research, school, creative
-- **Model Router** – OpenAI, Anthropic, xAI, Google, lokální / OpenAI-compatible API + fallback
-- **Desktop Control** – klávesnice, myš, okna, aplikace, soubory (s potvrzením rizikových akcí)
-- **AI Vision** – screenshoty, OCR, analýza UI, režimy OFF / ON DEMAND / PERIODIC
-- **Herní AI** – profily pro Minecraft, Fortnite, CS2, Valorant, LoL, ... (pouze poradenské funkce, žádný cheating)
-- **Overlay** – always-on-top rady a stav
-- **Performance Manager** – Quality / Balanced / Performance + priorita procesu
-- **Hlasový asistent** – čeština + další jazyky, hotkeys F8/F9/F10
-- **PC Monitoring Dashboard**
-- **Správa souborů, Smart Clipboard, Browser Assistant, Messaging**
-- **Bezpečnost** – malware checks, karanténa, potvrzení
-- **School Mode, Privacy Mode, App/Game Profiles**
-- **Tool system + permissions**
-- **Lokální auth + session management**
+## Hlavní pilíře
 
-## Architektura
-
-```
-src/
-  agent.py          # Hlavní AI agent + tool orchestrace
-  model.py          # Model router + providers
-  desktop.py        # Ovládání PC
-  screen.py         # Vision / screenshots / OCR
-  voice.py          # TTS / STT
-  overlay.py        # Always-on-top overlay
-  settings.py       # Konfigurace
-  game_profiles.py  # Herní profily
-  game_adapters.py  # Adaptéry pro hry
-  priority.py       # Priorita procesů
-  priority_monitor.py
-  performance.py
-  security.py
-  files.py
-  clipboard.py
-  browser.py
-  messaging.py
-  monitoring.py
-  auth.py
-  tools/            # Tool implementace
-  ui/               # Control Center + Chat UI
-  main.py
-config/
-tests/
-.env.example
-requirements.txt
-```
+| Modul | Co dělá |
+|-------|--------|
+| 🧠 **AI Core** | Více providerů, auto-výběr modelu, fallback, reasoning/coding/creative/research, paměť, osobnost |
+| 🎤 **Hlas** | Wake word **„Cypher“**, STT/TTS, čeština+, push-to-talk, výběr mikrofonu/hlasu |
+| 👁️ **Vision** | Screenshoty, OCR, UI analýza, multi-monitor, oblast, on-demand/periodic |
+| 🖥️ **Windows Assistant** | Aplikace, okna, soubory, clipboard, procesy, notifikace |
+| 🎮 **Gaming** | Profily, overlay, rady (Fortnite…), priority, auto-detekce hry |
+| ⚡ **Performance** | CPU/RAM/GPU/disk/síť, Quality/Balanced/Performance |
+| 🛡️ **Security Center** | Podezřelé soubory/procesy, Defender, karanténa, audit log |
+| 📁 **File AI** | Hledání, třídění, sumarizace, bezpečné mazání |
+| 🌐 **Web Agent** | Vyhledávání, shrnutí, citace zdrojů, Research Mode |
+| 💬 **Chat** | Moderní UI, historie, přílohy, regenerace, export |
+| 🧰 **AI Tools** | Calculator, Python, web, OCR, vision, files, game… |
+| 🔐 **Permissions** | READ_SCREEN, DELETE_FILE… + potvrzení |
+| 🎛️ **Control Center** | CYPHERpc ONLINE, AI, MODEL, VOICE, VISION, GAME, CPU… |
+| 🧩 **Plugins** | Modulární API (Spotify, Discord, Browser…) |
+| 🔔 **Smart Notifications** | Shrnutí, DND, Gaming/School/Work režim |
+| 📚 **School Mode** | Výuka, obtížnost, práce s obrázkem zadání |
+| 🌙 **Profiles** | Gaming / School / Privacy / Work |
+| 🔒 **Privacy Center** | Co běží + one-click kill switch |
 
 ## Rychlý start
 
-1. Naklonuj repozitář
-2. Vytvoř virtuální prostředí a nainstaluj závislosti:
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-3. Zkopíruj `.env.example` → `.env` a vyplň API klíče
-4. Spusť:
-   ```bash
-   python -m src.main
-   ```
+```bash
+git clone https://github.com/adamsanchezsh-ui/windows-ai-assistant.git
+cd windows-ai-assistant
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env   # vyplň API klíče
+python -m src.main
+```
 
-## Bezpečnostní pravidla
+## Wake word
 
-- Žádné obcházení anti-cheatu
-- Žádné automatické mazání důležitých souborů
-- Rizikové akce vyžadují potvrzení uživatele
-- Secrets pouze v `.env` / secrets manageru
-- Privacy Mode okamžitě zastaví vision, voice listening a automatické skeny
+Řekni **„Cypher“** (nebo stiskni push-to-talk) → AI naslouchá příkazu.
+
+## Bezpečnost
+
+- Žádný cheating / anti-cheat bypass
+- Rizikové akce = potvrzení
+- Privacy Mode / Emergency Stop okamžitě vše vypne
+- Secrets jen v `.env`
 
 ## Licence
 
-MIT (nebo dle volby majitele)
-
----
-
-Toto je **dobře strukturovaný základ** pro skutečný Windows AI asistent, který lze postupně rozšiřovat.
+MIT
