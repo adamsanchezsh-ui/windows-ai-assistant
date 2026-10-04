@@ -1,0 +1,47 @@
+app:
+  name: "Windows AI Assistant"
+  version: "0.1.0"
+  language: "cs"
+  theme: "dark"
+
+ai:
+  default_mode: "normal"
+  max_history: 50
+  temperature: 0.7
+  vision_mode: "on_demand"  # off | on_demand | periodic
+  periodic_interval_sec: 30
+  memory_enabled: false
+
+performance:
+  mode: "balanced"  # quality | balanced | performance
+  default_priority: "normal"  # normal | high
+
+overlay:
+  enabled: false
+  monitor: 1
+  opacity: 0.85
+
+voice:
+  enabled: false
+  language: "cs"
+  volume: 0.8
+  rate: 1.0
+  auto_detect_language: false
+
+hotkeys:
+  ai_toggle: "F8"
+  overlay_toggle: "F9"
+  voice_hints_toggle: "F10"
+
+monitors:
+  selected: 1
+  max_supported: 4
+
+security:
+  confirm_delete: true
+  confirm_system_change: true
+  confirm_send_message: true
+  use_defender: true
+  quarantine_instead_of_delete: true
+
+privacy_mode: false
