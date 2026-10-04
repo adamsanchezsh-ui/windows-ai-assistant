@@ -1,61 +1,61 @@
-# START HERE – otestuj CYPHERpc za 3 minuty
+# START HERE – CYPHERpc na Windows
 
-## 1. Instalace
+## Varianta A: Vse automaticky (doporuceno)
+
+V PowerShellu ve slozce projektu:
 
 ```powershell
-cd windows-ai-assistant
+# Pokud PowerShell blokuje skripty:
+Set-ExecutionPolicy -Scope Process Bypass
+
+# Stahne Python (kdyz neni), nainstaluje balicky, otestuje
+.\scripts\full_setup.ps1
+
+# + sestavi CYPHERpc.exe
+.\scripts\full_setup.ps1 -BuildExe
+```
+
+Pak:
+
+```text
+dist\CYPHERpc.exe
+```
+
+Vedle exe bude `.env` – volitelne dopln `OPENAI_API_KEY`.
+
+## Varianta B: Uz mas Python
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-```
-
-## 2. Smoke test
-
-```powershell
 python scripts\smoke_test.py
-```
-
-Musí vypsat samá `OK`.
-
-## 3. Spusť
-
-```powershell
 python -m src.main
 ```
 
-Napiš `ahoj` – odpoví i **bez API klíče** (demo).
+## Varianta C: Jen stahnout Python
 
-Zkuste:
-- `/todo add Test`
-- `/todo`
-- `/persona`
-- `/fortnite`
-- `/heal 40`
-- `/cc`
-- `/quit`
-
-## 4. Ostré AI (volitelné)
-
-Do `.env`:
-
-```
-OPENAI_API_KEY=sk-tvuj-klic
-PRIMARY_MODEL=openai:gpt-4o-mini
+```powershell
+.\scripts\download_python.ps1
 ```
 
-Restart `python -m src.main` – už odpovídá opravdový model.
-
-## 5. Hlas (volitelné)
-
-```
-/voice
-/persona grok_cs
-/speak test
-```
-
-(potřeba `edge-tts` – je v requirements)
+Portable Python bude ve slozce `python\`.
 
 ---
 
-Hotovo. Repo: https://github.com/adamsanchezsh-ui/windows-ai-assistant
+## Po instalaci
+
+```text
+ahoj
+/todo add Test
+/persona
+/fortnite
+/heal 40
+/cc
+/quit
+```
+
+Plne AI: do `.env` dej napr. `OPENAI_API_KEY=sk-...` a restart.
+
+Repo: https://github.com/adamsanchezsh-ui/windows-ai-assistant
