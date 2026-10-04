@@ -1,4 +1,4 @@
-"""CYPHERpc entry point – CLI + GUI, full tools, no artificial limits."""
+"""CYPHERpc entry point – CLI + GUI, user settings like Grok."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ from src.core.memory import MemoryStore
 from src.core.personality import Personality
 from src.core.model_selector import ModelSelector
 from src.core.permissions import PermissionManager
+from src.core.user_settings import UserSettingsStore
 from src.profiles import get_profile as get_user_profile, PROFILES
 from src.privacy import PrivacyCenter
 from src.notifications import SmartNotifications
@@ -45,7 +46,6 @@ from src.tools.calculator import calculate
 from src.tools.api_usage import APIUsageMonitor
 from src.tools.diagnostics import health_check, read_logs, system_info
 from src.hotkeys import HotkeyManager
-from src.command_palette import build_default_palette
 
 
 def setup_logging(log_dir: Path) -> None:
@@ -61,7 +61,13 @@ async def build_agent(settings) -> tuple[Agent, dict]:
     personality = Personality(language=settings.default_language)
     selector = ModelSelector(primary=settings.primary_model)
     perm_mgr = PermissionManager()
-    usage = APIUsageMonitor(settings.data_dir, daily_limit=0)  # 0 = unlimited
+    usage = APIUsageMonitor(settings.data_dir, daily_limit=0)
+    user_settings = UserSettingsStore(settings.data_dir)
+
+    # Apply feature prefs from user settings
+    us = user_settings.settings
+    memory.set_enabled(us.features.memory_enabled)
+    settings.ai.max_history = max(settings.ai.max_history, 200)
 
     agent = Agent(
         settings, router,
@@ -69,23 +75,24 @@ async def build_agent(settings) -> tuple[Agent, dict]:
         personality=personality,
         model_selector=selector,
         permission_manager=perm_mgr,
+        user_settings=user_settings,
     )
-    # Raise history capacity (no tight limit)
-    settings.ai.max_history = max(settings.ai.max_history, 200)
+    agent.auto_model_select = us.features.auto_model_select
+    agent.set_style(us.response.style)
 
     desktop = DesktopController()
     screen = ScreenService(
         settings.data_dir,
-        vision_mode=settings.ai.vision_mode,
+        vision_mode=us.features.vision_mode,
         selected_monitor=settings.selected_monitor,
         privacy_mode=settings.privacy_mode,
     )
     voice = VoiceService(
-        language=settings.voice.language,
+        language=us.response.language or settings.voice.language,
         volume=settings.voice.volume,
         rate=settings.voice.rate,
-        enabled=settings.voice.enabled,
-        wake_word_enabled=False,
+        enabled=us.features.voice_enabled,
+        wake_word_enabled=us.features.wake_word,
     )
     overlay = Overlay(monitor=settings.overlay.monitor, opacity=settings.overlay.opacity)
     performance = PerformanceManager(mode=settings.performance.mode)
@@ -101,7 +108,7 @@ async def build_agent(settings) -> tuple[Agent, dict]:
     chat_mgr = ChatManager(settings.data_dir)
     plugins = PluginManager()
     fn_adapter = FortniteAdapter()
-    web_agent = WebAgent(max_results=0)  # unlimited results from page
+    web_agent = WebAgent(max_results=0)
 
     def _privacy_stop() -> None:
         settings.privacy_mode = True
@@ -118,7 +125,6 @@ async def build_agent(settings) -> tuple[Agent, dict]:
 
     voice.set_command_handler(on_voice_command)
 
-    # --- Tools ---
     async def fortnite_heal(hp=None, shield=None, in_combat=False, about_to_rotate=False):
         advice = fn_adapter.heal_advice(hp=hp, shield=shield, in_combat=in_combat, about_to_rotate=about_to_rotate)
         overlay.update(tip=advice.message, status="FORTNITE")
@@ -171,33 +177,18 @@ async def build_agent(settings) -> tuple[Agent, dict]:
         if profile:
             agent.set_active_game(profile.name, profile.ai_instructions)
             overlay.update(status=profile.display_name.upper())
-            logger.info("Game detected: %s (PID %s)", profile.display_name, pid)
 
     priority_monitor = PriorityMonitor()
     priority_monitor.on_game_detected = on_game_detected
 
     services = {
-        "desktop": desktop,
-        "screen": screen,
-        "voice": voice,
-        "overlay": overlay,
-        "performance": performance,
-        "security": security,
-        "files": files,
-        "clipboard": clipboard,
-        "browser": browser,
-        "messaging": messaging,
-        "auth": auth,
-        "priority_monitor": priority_monitor,
-        "fn_adapter": fn_adapter,
-        "memory": memory,
-        "privacy": privacy,
-        "notifications": notifications,
-        "control_center": control_center,
-        "chat_mgr": chat_mgr,
-        "plugins": plugins,
-        "web_agent": web_agent,
-        "usage": usage,
+        "desktop": desktop, "screen": screen, "voice": voice, "overlay": overlay,
+        "performance": performance, "security": security, "files": files,
+        "clipboard": clipboard, "browser": browser, "messaging": messaging,
+        "auth": auth, "priority_monitor": priority_monitor, "fn_adapter": fn_adapter,
+        "memory": memory, "privacy": privacy, "notifications": notifications,
+        "control_center": control_center, "chat_mgr": chat_mgr, "plugins": plugins,
+        "web_agent": web_agent, "usage": usage, "user_settings": user_settings,
         "current_profile_id": "default",
     }
     return agent, services
@@ -222,7 +213,6 @@ def apply_user_profile(agent: Agent, services: dict, profile_id: str) -> None:
         services["screen"].set_privacy(False)
         services["voice"].set_privacy(False)
         agent.enabled = True
-    logger.info("Profile: %s", up.name)
 
 
 def show_control_center(agent: Agent, services: dict) -> None:
@@ -246,6 +236,9 @@ def show_control_center(agent: Agent, services: dict) -> None:
     )
     print(services["control_center"].format_cli(status))
     print("API usage:", services["usage"].snapshot())
+    us: UserSettingsStore = services["user_settings"]
+    print("—— Nastavení ——")
+    print(us.summary())
 
 
 def status_dict(agent: Agent, services: dict) -> dict:
@@ -269,22 +262,81 @@ def status_dict(agent: Agent, services: dict) -> dict:
     )
 
 
+def handle_settings_command(user: str, us: UserSettingsStore) -> bool:
+    """
+    /settings
+    /settings set name=Adam style=brief humor=true
+    /settings instructions <text>
+    /settings about <text>
+    /settings reset
+    """
+    low = user.lower().strip()
+    if low == "/settings":
+        print(us.summary())
+        print("\nZměna: /settings set key=value ...")
+        print("Klíče: name, nickname, style, length, tone, humor, emoji, language,")
+        print("       formality, tech_level, occupation, interests, assistant_name,")
+        print("       custom_instructions, always_do, avoid, memory_enabled, voice_enabled")
+        print("/settings instructions <text>  |  /settings about <text>  |  /settings reset")
+        return True
+
+    if low == "/settings reset":
+        us.reset()
+        print("Nastavení resetováno na výchozí.")
+        return True
+
+    if low.startswith("/settings instructions "):
+        text = user.split(" ", 2)[2] if len(user.split(" ", 2)) > 2 else ""
+        us.update(custom_instructions=text)
+        print("Custom instructions uloženy.")
+        return True
+
+    if low.startswith("/settings about "):
+        text = user.split(" ", 2)[2] if len(user.split(" ", 2)) > 2 else ""
+        us.update(notes=text)
+        print("Poznámky o tobě uloženy.")
+        return True
+
+    if low.startswith("/settings set "):
+        rest = user[len("/settings set "):].strip()
+        kwargs = {}
+        # parse key=value pairs (value can be quoted)
+        import re
+        for m in re.finditer(r'(\w+)=("([^"]*)"|\S+)', rest):
+            key, raw = m.group(1), m.group(2)
+            val = m.group(3) if m.group(3) is not None else raw
+            if val.lower() in ("true", "yes", "1"):
+                val = True
+            elif val.lower() in ("false", "no", "0"):
+                val = False
+            kwargs[key] = val
+        if not kwargs:
+            print("Použití: /settings set name=Adam style=brief humor=true")
+            return True
+        us.update(**kwargs)
+        print("Uloženo:")
+        print(us.summary())
+        return True
+
+    return False
+
+
 async def interactive_cli(agent: Agent, services: dict) -> None:
     print("=" * 62)
-    print("  CYPHERpc v0.3  –  unlimited AI desktop assistant")
-    print("  Wake word: Cypher  |  /help  |  python -m src.main --gui")
+    print("  CYPHERpc v0.3  –  AI s nastavením jako Grok")
+    print("  /settings  |  /help  |  --gui")
     print("=" * 62)
 
     services["priority_monitor"].start()
-    fn: FortniteAdapter = services["fn_adapter"]
+    fn = services["fn_adapter"]
     overlay = services["overlay"]
     voice = services["voice"]
-    memory: MemoryStore = services["memory"]
-    privacy: PrivacyCenter = services["privacy"]
-    chat_mgr: ChatManager = services["chat_mgr"]
-    web: WebAgent = services["web_agent"]
+    memory = services["memory"]
+    privacy = services["privacy"]
+    chat_mgr = services["chat_mgr"]
+    web = services["web_agent"]
+    us: UserSettingsStore = services["user_settings"]
 
-    # Hotkeys
     hk = HotkeyManager()
     hk.register_defaults(
         on_ai_toggle=lambda: print("AI:", "ON" if agent.toggle() else "OFF"),
@@ -307,38 +359,41 @@ async def interactive_cli(agent: Agent, services: dict) -> None:
             break
         if low in ("/help", "/?"):
             print("""
+/settings              zobraz nastavení (jako Grok/ChatGPT)
+/settings set k=v      změň styl, jméno, humor, …
+/settings instructions text   vlastní instrukce
+/settings about text          co o tobě AI ví
+/settings reset
 /cc /status /mode /profile /privacy /stop /new /chats
-/memory [on|off] /forget all /style /voice /wake
-/fortnite /heal /rotate /pos
-/search <dotaz>     web research se zdroji
-/calc <výraz>       kalkulačka
-/diag               diagnostika
-/logs               poslední log
-/usage              API spotřeba (unlimited default)
-/what /quit
+/memory /style /voice /wake /fortnite /heal /rotate /pos
+/search /calc /diag /logs /usage /what
 """)
             continue
+
+        if low.startswith("/settings"):
+            handle_settings_command(user, us)
+            # sync style to agent
+            agent.set_style(us.settings.response.style)
+            agent.auto_model_select = us.settings.features.auto_model_select
+            memory.set_enabled(us.settings.features.memory_enabled)
+            continue
+
         if low in ("/cc", "/control", "/dashboard"):
-            show_control_center(agent, services)
-            continue
+            show_control_center(agent, services); continue
         if low == "/status":
-            print(json.dumps(agent.status(), indent=2, ensure_ascii=False))
-            continue
+            print(json.dumps(agent.status(), indent=2, ensure_ascii=False)); continue
         if low.startswith("/mode "):
             try:
-                agent.set_mode(user.split(maxsplit=1)[1])
-                print("Režim:", agent.mode.value)
+                agent.set_mode(user.split(maxsplit=1)[1]); print("Režim:", agent.mode.value)
             except ValueError:
                 print([m.value for m in AIMode])
             continue
         if low.startswith("/profile "):
             pid = user.split(maxsplit=1)[1].strip().lower()
             if pid not in PROFILES:
-                print(list(PROFILES.keys()))
-                continue
+                print(list(PROFILES.keys())); continue
             apply_user_profile(agent, services, pid)
-            show_control_center(agent, services)
-            continue
+            show_control_center(agent, services); continue
         if low == "/privacy":
             if agent.settings.privacy_mode:
                 privacy.disable_privacy_mode()
@@ -348,17 +403,12 @@ async def interactive_cli(agent: Agent, services: dict) -> None:
                 agent.enabled = True
                 print("Privacy: OFF")
             else:
-                privacy.enable_privacy_mode()
-                print("Privacy: ON")
+                privacy.enable_privacy_mode(); print("Privacy: ON")
             continue
         if low in ("/stop", "/emergency"):
-            privacy.emergency_stop()
-            print("EMERGENCY STOP")
-            continue
+            privacy.emergency_stop(); print("EMERGENCY STOP"); continue
         if low == "/new":
-            print("Nová:", agent.new_conversation().id)
-            chat_mgr.new_conversation()
-            continue
+            print("Nová:", agent.new_conversation().id); chat_mgr.new_conversation(); continue
         if low == "/chats":
             for c in chat_mgr.list_conversations():
                 print(f"  {c['id'][:8]}  {c['title']}  ({c['messages']})")
@@ -368,49 +418,41 @@ async def interactive_cli(agent: Agent, services: dict) -> None:
             print("(vypnuto)" if not memory.enabled else "\n".join(f"[{i.id}] {i.content}" for i in items) or "(prázdná)")
             continue
         if low == "/memory on":
-            memory.set_enabled(True); print("Paměť ON"); continue
+            memory.set_enabled(True); us.update(memory_enabled=True); print("Paměť ON"); continue
         if low == "/memory off":
-            memory.set_enabled(False); print("Paměť OFF"); continue
+            memory.set_enabled(False); us.update(memory_enabled=False); print("Paměť OFF"); continue
         if low == "/forget all":
             print("Smazáno", memory.forget_all()); continue
         if low.startswith("/style "):
-            agent.set_style(user.split(maxsplit=1)[1]); print(agent.personality.style.value); continue
+            st = user.split(maxsplit=1)[1]
+            agent.set_style(st); us.update(style=st); print("Styl:", st); continue
         if low == "/voice":
-            print("Voice", "ON" if voice.toggle() else "OFF"); continue
+            on = voice.toggle(); us.update(voice_enabled=on); print("Voice", "ON" if on else "OFF"); continue
         if low == "/wake":
-            print("Wake", "ON" if voice.toggle_wake_word() else "OFF"); continue
+            on = voice.toggle_wake_word(); us.update(wake_word=on); print("Wake", "ON" if on else "OFF"); continue
         if low == "/fortnite":
             p = get_profile("fortnite")
             if p:
                 agent.set_active_game("fortnite", p.ai_instructions)
-                overlay.enabled = True
-                print("Fortnite kouč ON")
+                overlay.enabled = True; print("Fortnite kouč ON")
             continue
         if low.startswith("/heal"):
             parts = user.split()
             hp = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
             sh = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
-            a = fn.heal_advice(hp=hp, shield=sh)
-            print(a.message); overlay.update(tip=a.message)
-            continue
+            a = fn.heal_advice(hp=hp, shield=sh); print(a.message); continue
         if low.startswith("/rotate"):
-            a = fn.rotation_advice()
-            print(a.direction, "—", a.reason)
-            for t in a.tips: print(" •", t)
-            continue
+            a = fn.rotation_advice(); print(a.direction, "—", a.reason)
+            for t in a.tips: print(" •", t); continue
         if low.startswith("/pos"):
             phase = user.split()[1] if len(user.split()) > 1 else "mid"
             print(fn.position_advice(phase=phase).suggestion); continue
         if low.startswith("/search "):
             q = user.split(maxsplit=1)[1]
             report = await web.research(q)
-            print(report.summary)
-            print("Zdroje:", report.sources)
-            # Also ask AI to synthesize
-            prompt = web.research_prompt(report)
-            reply = await agent.chat(prompt)
-            print("\nCYPHERpc:", reply)
-            continue
+            print(report.summary); print("Zdroje:", report.sources)
+            reply = await agent.chat(web.research_prompt(report))
+            print("\nCYPHERpc:", reply); continue
         if low.startswith("/calc "):
             print(calculate(user.split(maxsplit=1)[1])); continue
         if low == "/diag":
@@ -421,14 +463,12 @@ async def interactive_cli(agent: Agent, services: dict) -> None:
         if low == "/usage":
             print(services["usage"].snapshot()); continue
         if low in ("/what", "/co umíš", "/co umis"):
-            print("Chat, coding, vision, web, Windows, gaming, hlas Cypher, privacy, GUI — piš cokoliv.")
-            continue
+            print("Chat jako Grok + nastavení, Windows, vision, web, gaming, hlas."); continue
 
         try:
             chat_mgr.add_message("user", user)
             reply = await agent.chat(user)
             chat_mgr.add_message("assistant", reply)
-            # Track usage if response has usage info (best-effort)
             print("\nCYPHERpc:", reply)
             if voice.enabled and voice.hints_enabled:
                 await voice.speak(reply)
@@ -446,9 +486,7 @@ def run_gui(agent: Agent, services: dict) -> None:
         from src.ui.gui import CypherGUI
     except Exception as e:
         print("GUI nedostupné:", e)
-        print("Nainstaluj: pip install customtkinter")
         return
-
     services["priority_monitor"].start()
 
     async def on_send(text: str) -> str:
@@ -473,13 +511,11 @@ def main() -> None:
     settings = get_settings()
     setup_logging(settings.log_dir)
     logger.info("Starting CYPHERpc v0.3.0")
-
     use_gui = "--gui" in sys.argv or "-g" in sys.argv
 
     async def runner():
         agent, services = await build_agent(settings)
         if use_gui:
-            # GUI blocks; run setup then hand off
             return agent, services
         await interactive_cli(agent, services)
         return None, None
