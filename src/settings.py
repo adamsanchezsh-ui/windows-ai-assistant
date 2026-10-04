@@ -1,8 +1,7 @@
-"""Application settings and configuration loading."""
+"""Application settings – works for source and CYPHERpc.exe."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -13,6 +12,8 @@ try:
     import yaml
 except ImportError:
     yaml = None  # type: ignore
+
+from src.paths import app_root, ensure_env_file, resource_root
 
 
 class AISettings(BaseSettings):
@@ -58,7 +59,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Secrets / providers
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     xai_api_key: str | None = None
@@ -69,12 +69,10 @@ class Settings(BaseSettings):
     local_api_key: str | None = None
     app_secret_key: str = "change-me"
 
-    # Paths
     data_dir: Path = Path("./data")
     log_dir: Path = Path("./logs")
     quarantine_dir: Path = Path("./data/quarantine")
 
-    # Feature flags
     enable_vision: bool = True
     enable_voice: bool = True
     enable_web_search: bool = True
@@ -82,7 +80,6 @@ class Settings(BaseSettings):
 
     default_language: str = "cs"
 
-    # Nested (loaded from yaml or defaults)
     ai: AISettings = Field(default_factory=AISettings)
     performance: PerformanceSettings = Field(default_factory=PerformanceSettings)
     overlay: OverlaySettings = Field(default_factory=OverlaySettings)
@@ -98,18 +95,35 @@ class Settings(BaseSettings):
         self.quarantine_dir.mkdir(parents=True, exist_ok=True)
 
 
-def load_yaml_config(path: Path | str = "config/settings.yaml") -> dict[str, Any]:
-    p = Path(path)
-    if not p.exists() or yaml is None:
+def load_yaml_config(path: Path | str | None = None) -> dict[str, Any]:
+    if path is None:
+        candidates = [
+            app_root() / "config" / "settings.yaml",
+            resource_root() / "config" / "settings.yaml",
+        ]
+    else:
+        candidates = [Path(path)]
+    if yaml is None:
         return {}
-    with p.open(encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    for p in candidates:
+        if p.exists():
+            with p.open(encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    return {}
 
 
 def get_settings() -> Settings:
-    """Load settings from env + optional yaml."""
+    root = app_root()
+    env_path = ensure_env_file()
+
+    # Load .env from next to exe / project root
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_path)
+    except ImportError:
+        pass
+
     yaml_data = load_yaml_config()
-    # Simple merge of known sections
     kwargs: dict[str, Any] = {}
     if "ai" in yaml_data:
         kwargs["ai"] = AISettings(**yaml_data["ai"])
@@ -126,6 +140,18 @@ def get_settings() -> Settings:
     if "monitors" in yaml_data and "selected" in yaml_data["monitors"]:
         kwargs["selected_monitor"] = yaml_data["monitors"]["selected"]
 
+    # Default data/logs next to executable
+    kwargs.setdefault("data_dir", root / "data")
+    kwargs.setdefault("log_dir", root / "logs")
+    kwargs.setdefault("quarantine_dir", root / "data" / "quarantine")
+
     s = Settings(**kwargs)
+    # Absolute paths relative to app root
+    if not s.data_dir.is_absolute():
+        s.data_dir = root / s.data_dir
+    if not s.log_dir.is_absolute():
+        s.log_dir = root / s.log_dir
+    if not s.quarantine_dir.is_absolute():
+        s.quarantine_dir = root / s.quarantine_dir
     s.ensure_dirs()
     return s
