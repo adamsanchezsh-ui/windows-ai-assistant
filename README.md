@@ -1,45 +1,95 @@
 # CYPHERpc
 
-**CYPHERpc** = AI mozek + hlas + Vision + Windows assistant + web researcher + coding + gaming + security + monitoring + Control Center + GUI.
+Desktopový AI asistent pro Windows – chat (Grok/ChatGPT úroveň), hlas, work tools, Fortnite kouč, vision, privacy.
 
-Desktopový AI asistent pro Windows na úrovni ChatGPT / Claude – **bez umělých limitů** na délku konverzace, OCR, web výsledky ani API (limit jen pokud si ho sám nastavíš).
+**Použitelné hned** – i bez API klíče běží **demo režim** (příkazy, úkoly, herní tipy). S klíčem máš plné AI.
+
+---
+
+## Rychlý start (Windows)
+
+```powershell
+git clone https://github.com/adamsanchezsh-ui/windows-ai-assistant.git
+cd windows-ai-assistant
+
+# A) setup skript
+.\scripts\setup.ps1
+
+# NEBO ručně:
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+### Test že to žije
+
+```powershell
+python scripts\smoke_test.py
+python -m src.main
+```
+
+V chatu zkus:
+
+```text
+ahoj
+/todo add Otestovat CYPHERpc
+/todo
+/settings
+/persona
+/fortnite
+/heal 35
+/cc
+/help
+```
+
+GUI: `python -m src.main --gui`  nebo  `.\scripts\run_gui.bat`
+
+---
+
+## API klíč (plné AI)
+
+Uprav `.env` – stačí **jeden**:
+
+```env
+OPENAI_API_KEY=sk-...
+# nebo
+XAI_API_KEY=xai-...
+# nebo
+ANTHROPIC_API_KEY=sk-ant-...
+
+PRIMARY_MODEL=openai:gpt-4o
+# pro xAI:
+# PRIMARY_MODEL=xai:grok-2-latest
+```
+
+Bez klíče = automaticky **demo** provider (stále můžeš testovat vše kromě ostrého LLM).
+
+---
+
+## Hlavní příkazy
+
+| Příkaz | Popis |
+|--------|--------|
+| `/settings` | styl odpovědí jako Grok |
+| `/voice` `/persona` `/wake` | hlas + Grok persony |
+| `/work` `/todo` `/note` `/email` | práce |
+| `/fortnite` `/heal` `/pos` `/rotate` | herní kouč |
+| `/search ...` | web |
+| `/cc` | Control Center |
+| `/privacy` `/stop` | soukromí / emergency |
+
+---
 
 ## Co umí
 
-- 🧠 **AI Core** – OpenAI, Anthropic, xAI, Google, lokální; auto-výběr modelu; fallback; paměť; osobnost
-- 🎤 **Hlas** – wake word **Cypher**, STT/TTS, PTT, výběr mic/hlasu
-- 👁️ **Vision** – screenshot, oblast, OCR (plný text), multi-monitor (všechny detekované)
-- 🖥️ **Windows** – okna, soubory, clipboard, procesy
-- 🎮 **Gaming** – Fortnite kouč (pozice, heal, rotace), auto-detekce her
-- 🌐 **Web Agent** – vyhledávání, čtení stránek, citace zdrojů
-- 💬 **Chat GUI** – moderní dark UI (CustomTkinter)
-- 🎛️ **Control Center** – živý stav CPU/RAM/GPU/AI/Voice/Game
-- 🔒 **Privacy + Emergency Stop**
-- ⌨️ **Hotkeys** F8–F11, Ctrl+Shift+C/P/X
-- 📍 **Tray** (volitelně)
-- 🧰 **Tools** – calculator, web, OCR, files, game…
-- 🧩 **Plugin API**
+- AI Core (OpenAI, Anthropic, xAI, local, **demo**)
+- Grok-like hlasy (edge-tts)
+- Work suite (zprávy, úkoly, poznámky, e-mail drafty)
+- Fortnite guidance, Windows tools, web, privacy
+- CLI + GUI
 
-## Start
-
-```bash
-git clone https://github.com/adamsanchezsh-ui/windows-ai-assistant.git
-cd windows-ai-assistant
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-# vyplň OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY
-python -m src.main          # CLI
-python -m src.main --gui    # grafické rozhraní
-```
-
-## Bez limitů
-
-- Historie konverzace: nastavitelná, výchozí vysoká
-- OCR / web fetch: plný obsah (bez zbytečného ořezu)
-- API daily limit: `0` = neomezeno
-- Monitory: všechny, které OS nahlásí
+---
 
 ## Licence
 
